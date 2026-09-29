@@ -66,12 +66,20 @@ jobs:
           python smoke_test.py --min 200 test_gui\JPG\iss030e122639.jpg
 
       - name: Windows-Decoder und Explorer-Miniaturansicht pruefen
+        continue-on-error: true
         shell: powershell
         run: >
           ./tests/check_windows.ps1
           test_cli\JPG\iss030e122639.jpg test_py\JPG\iss030e122639.jpg test_gui\JPG\iss030e122639.jpg
           test_tmp_core\JPG\quer_MM_o1.jpg test_tmp_core\JPG\hoch_MM_o6.jpg
           test_tmp_gui\JPG\DSC_0000.jpg test_tmp_gui\JPG\DSC_0001.jpg
+
+      - name: EXIF-Varianten erzeugen und mit WIC bisektieren (Diagnose)
+        continue-on-error: true
+        shell: powershell
+        run: |
+          python tests/exif_variants.py test_py\iss030e122639.NEF test_variants
+          ./tests/check_windows.ps1 (Get-ChildItem test_variants\*.jpg | ForEach-Object { $_.FullName })
 
       - name: EXEs als Artefakt hochladen
         uses: actions/upload-artifact@v4

@@ -126,27 +126,93 @@ def scan_nef(data: bytes) -> tuple[list[tuple[int, int]], int]:
     return found, state["orientation"]
 
 
-def build_exif(data: bytes) -> bytes:
-    """EXIF-Block fuer das JPG aus den Metadaten der NEF, ohne MakerNote, Orientation = 1."""
+TIFF_TYPE_SIZE = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8, 13: 4}
+
+
+def read_ifd_entries(data: bytes, endian: str, base: int, ifd: int) -> list[tuple[int, int, int, bytes]]:
+    """Alle Eintraege eines IFD als (Tag, Typ, Anzahl, Rohdaten), Eintraege mit Problemen werden uebergangen."""
+    pos = base + ifd
+    if ifd <= 0 or pos + 2 > len(data):
+        return []
+    n = struct.unpack_from(endian + "H", data, pos)[0]
+    if pos + 2 + 12 * n + 4 > len(data):
+        return []
+    entries = []
+    for i in range(n):
+        e = pos + 2 + 12 * i
+        tag, typ, count = struct.unpack_from(endian + "HHI", data, e)
+        size = TIFF_TYPE_SIZE.get(typ)
+        if size is None or count == 0 or count > 1_000_000:
+            continue
+        total = size * count
+        src = e + 8 if total <= 4 else base + struct.unpack_from(endian + "I", data, e + 8)[0]
+        if src < 0 or src + total > len(data):
+            continue
+        entries.append((tag, typ, count, data[src:src + total]))
+    return entries
+
+
+def serialize_tiff(endian: str, ifd0: list, exif_ifd: list, gps_ifd: list) -> bytes:
+    """Baut eine TIFF-Struktur (Header, IFD0 mit Zeigern auf Exif- und GPS-IFD) aus Rohdaten-Eintraegen."""
+    def block_size(entries: list) -> int:
+        return 2 + 12 * len(entries) + 4 + sum((len(raw) + 1) // 2 * 2 for _, _, _, raw in entries if len(raw) > 4)
+
+    def block(entries: list, offset: int) -> bytes:
+        entries = sorted(entries, key=lambda e: e[0])
+        head = struct.pack(endian + "H", len(entries))
+        data_off = offset + 2 + 12 * len(entries) + 4
+        extra = bytearray()
+        for tag, typ, count, raw in entries:
+            if len(raw) <= 4:
+                field = raw.ljust(4, b"\0")
+            else:
+                field = struct.pack(endian + "I", data_off + len(extra))
+                extra += raw
+                if len(extra) % 2:
+                    extra += b"\0"
+            head += struct.pack(endian + "HHI", tag, typ, count) + field
+        return head + b"\0\0\0\0" + bytes(extra)
+
+    pointer = lambda tag, off: (tag, 4, 1, struct.pack(endian + "I", off))  # noqa: E731
+    ifd0 = [e for e in ifd0 if e[0] not in (0x8769, 0x8825)]
+    exif_off = 8 + block_size(ifd0 + [pointer(0x8769, 0)] + ([pointer(0x8825, 0)] if gps_ifd else []))
+    gps_off = exif_off + block_size(exif_ifd)
+    ifd0 = ifd0 + [pointer(0x8769, exif_off)] + ([pointer(0x8825, gps_off)] if gps_ifd else [])
+    header = (b"MM\0\x2a" if endian == ">" else b"II\x2a\0") + struct.pack(endian + "I", 8)
+    out = header + block(ifd0, 8) + block(exif_ifd, exif_off)
+    if gps_ifd:
+        out += block(gps_ifd, gps_off)
+    return out
+
+
+def build_exif(data: bytes, *, keep: set[int] | None = None, skip: set[int] = SKIP_EXIF_TAGS,
+               gps: bool = True) -> bytes:
+    """EXIF-Block (APP1-Nutzdaten) fuer das JPG aus den Metadaten der NEF, Orientation = 1.
+
+    Die Eintraege werden byteidentisch aus IFD0, Exif-IFD und GPS-IFD der NEF kopiert, mit den
+    Originaltypen der Kamera. MakerNote und Interop-Zeiger bleiben weg (skip), keep begrenzt die
+    Exif-IFD-Tags auf eine Auswahl, gps schaltet das GPS-IFD ab.
+    """
+    endian = {b"MM": ">", b"II": "<"}.get(data[:2], ">")
+    ifd0_entries: list = []
+    exif_entries: list = []
+    gps_entries: list = []
     try:
-        src = Image.Exif()
-        src.load(data)
-        exif = Image.Exif()
-        for tag in COPY_IFD0_TAGS:
-            if tag in src:
-                exif[tag] = src[tag]
-        exif_ifd = {k: v for k, v in src.get_ifd(0x8769).items() if k not in SKIP_EXIF_TAGS}
-        if exif_ifd:
-            exif[0x8769] = exif_ifd
-        gps = src.get_ifd(0x8825)
-        if gps:
-            exif[0x8825] = dict(gps)
-        exif[0x0112] = 1
-        return exif.tobytes()
+        ifd0 = read_ifd_entries(data, endian, 0, struct.unpack_from(endian + "I", data, 4)[0])
+        ifd0_entries = [e for e in ifd0 if e[0] in COPY_IFD0_TAGS]
+        for tag, typ, count, raw in ifd0:
+            if typ not in (4, 13) or count != 1:
+                continue
+            off = struct.unpack_from(endian + "I", raw)[0]
+            if tag == 0x8769:
+                exif_entries = [e for e in read_ifd_entries(data, endian, 0, off)
+                                if e[0] not in skip and e[1] != 13 and (keep is None or e[0] in keep)]
+            elif tag == 0x8825 and gps:
+                gps_entries = [e for e in read_ifd_entries(data, endian, 0, off) if e[1] != 13]
     except Exception:
-        minimal = Image.Exif()
-        minimal[0x0112] = 1
-        return minimal.tobytes()
+        ifd0_entries, exif_entries, gps_entries = [], [], []
+    ifd0_entries = [e for e in ifd0_entries if e[0] != 0x0112] + [(0x0112, 3, 1, struct.pack(endian + "H", 1))]
+    return b"Exif\0\0" + serialize_tiff(endian, ifd0_entries, exif_entries, gps_entries)
 
 
 def with_exif(jpg: bytes, exif: bytes) -> bytes:
