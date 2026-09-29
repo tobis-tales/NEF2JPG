@@ -1,0 +1,92 @@
+name: Windows-Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Abhaengigkeiten installieren
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Kern-Test mit synthetischen NEF-Dateien
+        run: python tests/test_core.py
+
+      - name: Oberflaechen-Test (tkinter auf dem Windows-Desktop des Runners)
+        run: python tests/test_gui.py
+
+      - name: Kern-Test mit einer echten NEF-Datei (Python)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path test_py | Out-Null
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/letmaik/rawpy/main/test/iss030e122639.NEF" -OutFile test_py\iss030e122639.NEF
+          python nef2jpg.py test_py --jobs 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python smoke_test.py --min 2000 test_py\JPG\iss030e122639.jpg
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python nef2jpg.py test_py --embedded --overwrite
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python smoke_test.py --min 200 test_py\JPG\iss030e122639.jpg
+
+      - name: EXEs bauen
+        run: |
+          pyinstaller --onefile --windowed --name NEF2JPG --icon app.ico --add-data "app.ico;." nef2jpg_gui.py
+          pyinstaller --onefile --console --name nef2jpg-cli --icon app.ico nef2jpg.py
+
+      - name: EXE-Test mit einer echten NEF-Datei
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path test_cli, test_gui | Out-Null
+          Copy-Item test_py\iss030e122639.NEF test_cli\
+          Copy-Item test_py\iss030e122639.NEF test_gui\
+          .\dist\nef2jpg-cli.exe --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\dist\nef2jpg-cli.exe test_cli --jobs 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python smoke_test.py --min 2000 test_cli\JPG\iss030e122639.jpg
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $p = Start-Process -FilePath "$PWD\dist\NEF2JPG.exe" -ArgumentList "--cli", "$PWD\test_gui", "--embedded" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Host "NEF2JPG.exe --cli Exit-Code $($p.ExitCode)"; exit $p.ExitCode }
+          python smoke_test.py --min 200 test_gui\JPG\iss030e122639.jpg
+
+      - name: EXEs als Artefakt hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEF2JPG-windows
+          path: |
+            dist/NEF2JPG.exe
+            dist/nef2jpg-cli.exe
+          if-no-files-found: error
+
+      - name: Testbilder hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: testbilder
+          path: |
+            test_cli/JPG/*.jpg
+            test_gui/JPG/*.jpg
+
+      - name: Release mit EXEs anlegen (nur bei Tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}" dist/NEF2JPG.exe dist/nef2jpg-cli.exe
+          --title "NEF2JPG ${{ github.ref_name }}" --generate-notes

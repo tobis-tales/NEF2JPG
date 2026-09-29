@@ -1,0 +1,12 @@
+# Build-Ausgaben
+build/
+dist/
+*.spec
+*.exe
+.venv/
+__pycache__/
+*.pyc
+
+# Testordner
+test_tmp_*/
+*.zip
