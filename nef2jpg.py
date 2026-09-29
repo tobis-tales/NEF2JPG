@@ -44,7 +44,7 @@ try:
 except ImportError:  # ohne rawpy funktioniert nur der eingebettete Modus
     rawpy = None
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 # EXIF-Orientation -> Pillow-Transposition (Pillow dreht gegen den Uhrzeigersinn)
 ORIENTATION_TO_TRANSPOSE = {

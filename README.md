@@ -82,6 +82,7 @@ im Installer „Add python.exe to PATH“ anhaken.
 | `nef2jpg.py` | Kern: Konvertierung, Kommandozeile, NEF-Struktur lesen, EXIF übernehmen |
 | `nef2jpg_gui.py` | Oberfläche (tkinter), nutzt den Kern |
 | `smoke_test.py` | Prüfung der erzeugten JPGs im CI-Build |
+| `tests/` | synthetische NEF-Dateien, Kern- und GUI-Test, Windows-Decoder-Prüfung (`check_windows.ps1`) |
 | `make_icon.py` | erzeugt `app.ico` |
 | `build.bat` | lokaler Windows-Build |
 | `.github/workflows/build.yml` | Cloud-Build, Test und Release |
@@ -91,7 +92,10 @@ im Installer „Add python.exe to PATH“ anhaken.
 - Manche Virenscanner stufen mit PyInstaller gebaute Programme fälschlich als
   verdächtig ein. In dem Fall die Datei im Virenscanner freigeben.
 - Die Nikon-MakerNote wird nicht ins JPG übernommen, sie ist dafür zu groß.
-  Alle Standard-EXIF-Felder bleiben erhalten.
+  Alle Standard-EXIF-Felder werden byteidentisch aus der NEF kopiert. Der
+  CI-Build prüft jedes erzeugte JPG mit den Windows-eigenen Decodern (WIC,
+  GDI+) und der Explorer-Miniaturansicht, damit Vorschau und Fotos-App
+  die Dateien sicher anzeigen.
 - Beim Entwickeln werden bis zu 8 Prozesse parallel gestartet; jeder braucht
   bei 45-Megapixel-Dateien einige hundert MB Arbeitsspeicher. Bei knappem
   Speicher die Anzahl der Prozesse verringern.
