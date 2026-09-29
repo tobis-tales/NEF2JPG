@@ -1,0 +1,44 @@
+name: Diagnose-JPG
+
+# Prueft beliebige JPGs auf dem Windows-Runner mit WIC, GDI+ und dem Shell-Bildabruf.
+# Die Dateien haengen als Assets an einem Draft-Release (Standard: "diag-sample"),
+# damit sie nicht im Repo landen. Start: gh workflow run diagnose.yml
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Draft-Release mit den JPG-Dateien als Assets"
+        default: "diag-sample"
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: JPGs vom Draft-Release holen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ inputs.release }}" --pattern "*.jpg" -D diag
+
+      - name: Varianten erzeugen
+        shell: pwsh
+        run: Get-ChildItem diag\*.jpg | ForEach-Object { python tests/jpg_variants.py $_.FullName ("varianten_" + $_.BaseName) }
+
+      - name: Windows-Decoder und Shell-Bildabruf pruefen
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $files = Get-ChildItem -Recurse -Filter *.jpg -Path varianten_* | Sort-Object FullName | ForEach-Object { $_.FullName }
+          & ./tests/check_windows.ps1 @files
