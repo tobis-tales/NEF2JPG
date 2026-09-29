@@ -337,7 +337,7 @@ class App(tk.Tk):
         name, kind, detail, libraw_problem = result
         self.done += 1
         self.counts[kind] = self.counts.get(kind, 0) + 1
-        if libraw_problem:
+        if libraw_problem and kind == "eingebettet":
             self.libraw_problems[libraw_problem] = self.libraw_problems.get(libraw_problem, 0) + 1
         if kind == "fehler":
             self.errors.append(f"{name}: {detail}")
@@ -370,7 +370,7 @@ class App(tk.Tk):
         self.log_line("")
         self.log_line(summary, "fehler" if self.counts["fehler"] else "")
         for problem, n in self.libraw_problems.items():
-            self.log_line(f"Hinweis: {n} Dateien konnte LibRaw nicht entwickeln ({problem}).", "hinweis")
+            self.log_line(f"Hinweis: {n} {'Datei' if n == 1 else 'Dateien'} konnte LibRaw nicht entwickeln ({problem}).", "hinweis")
             self.log_line("Das ist typisch für NEFs im HE/HE*-Format. "
                           "Dafür wurde das eingebettete Kamera-JPG übernommen.", "hinweis")
         self.var_status.set(summary)

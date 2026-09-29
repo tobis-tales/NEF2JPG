@@ -306,7 +306,7 @@ def main() -> int:
         for i, fut in enumerate(as_completed(futures), 1):
             name, kind, detail, libraw_problem = fut.result()
             counts[kind] += 1
-            if libraw_problem:
+            if libraw_problem and kind == "eingebettet":
                 libraw_problems[libraw_problem] = libraw_problems.get(libraw_problem, 0) + 1
             if kind == "fehler":
                 print(f"[{i}/{len(jobs)}] {name} ... FEHLER")
@@ -320,7 +320,7 @@ def main() -> int:
     lines = [f"{counts['entwickelt']} entwickelt, {counts['eingebettet']} eingebettetes Kamera-JPG, "
              f"{counts['fehler']} Fehler, {skipped} uebersprungen, {elapsed:.1f} s"]
     for problem, n in libraw_problems.items():
-        lines.append(f"Hinweis: {n} Dateien konnte LibRaw nicht entwickeln ({problem}).")
+        lines.append(f"Hinweis: {n} {'Datei' if n == 1 else 'Dateien'} konnte LibRaw nicht entwickeln ({problem}).")
         lines.append("Das ist typisch fuer NEFs im HE/HE*-Format. Dafuer wurde das eingebettete Kamera-JPG uebernommen.")
     lines.extend("  " + e for e in errors)
     print("\n".join(lines))

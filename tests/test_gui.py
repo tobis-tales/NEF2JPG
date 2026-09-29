@@ -59,9 +59,19 @@ def main():
     assert str(app.btn_open["state"]) == "normal"
     assert "6 davon schon als JPG vorhanden" in app.lbl_folder_info.cget("text")
 
-    print("\n-- Lauf 2: entwickeln, alles vorhanden -> nichts zu tun")
+    print("\n-- Lauf 2: entwickeln ohne Ueberschreiben -> nur die defekte Datei wird erneut versucht")
     app.var_mode.set("develop")
     app.refresh_options()
+    app.start()
+    pump(app)
+    log = app.log.get("1.0", "end")
+    print("Status:", app.var_status.get())
+    assert app.total == 1 and app.counts["fehler"] == 1 and "6 \u00fcbersprungen" in log, (app.total, app.counts, log)
+    assert not app.libraw_problems, "LibRaw-Hinweis darf nur bei erfolgreichem Umschalten erscheinen"
+
+    print("\n-- Lauf 2b: defekte Datei weg, alles vorhanden -> nichts zu tun")
+    (T / "kaputt.NEF").unlink()
+    app.refresh_folder_info()
     app.start()
     pump(app)
     assert app.total == 0 and "Nichts zu tun" in app.log.get("1.0", "end"), app.log.get("1.0", "end")
